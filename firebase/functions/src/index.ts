@@ -4,8 +4,9 @@ import * as express from 'express';
 import * as cors from 'cors';
 import * as types from './types';
 import * as jwt from 'jsonwebtoken';
+import config from './config';
 
-const SECRET = 'f8464c55fa033d16c4c80bd0fe7742b9ab54bca17cbc84d2cc4a43f564df93137ffa6c90883c6f58fdcea133798bcd7a9a00d3f7864fe45c83b60c8550229767';
+const SECRET = config.SECRET;
 
 const app = express();
 app.use(cors());
@@ -14,8 +15,8 @@ const blog = express.Router();
 
 function authCheck(req: express.Request, res: express.Response, next: express.NextFunction)
 {
-  const auth = req.header('authorization');
-  const match = auth?.match(/^Bearer: (.+)$/)
+  const auth = req.header('Authorization');
+  const match = auth?.match(/^Bearer (.+)$/)
   if (!match)
   {
     res.status(401).json({
@@ -79,7 +80,7 @@ app.post('/auth/login', async function(req, res)
 
 blog.get('/articles', async function(req, res)
 {
-  const articlesSnapshot = await db.collection('/Articles').orderBy('created_datetime', 'desc').get();
+  const articlesSnapshot = await db.collection('/Articles').orderBy('created', 'desc').get();
   const articles = articlesSnapshot.docs.map(doc =>
   {
     const article = doc.data();
@@ -87,8 +88,8 @@ blog.get('/articles', async function(req, res)
       id: doc.id,
       author: article.author,
       title: article.title,
-      created_datetime: article.created_datetime,
-      updated_datetime: article.updated_datetime
+      created: article.created,
+      updated: article.updated
     };
   });
 
@@ -127,8 +128,8 @@ blog.get('/articles/:id', async function(req, res)
         id: articleDoc.id,
         author: article?.author,
         title: article?.title,
-        created_datetime: article?.created_datetime,
-        updated_datetime: article?.updated_datetime
+        created: article?.created,
+        updated: article?.updated
       }
     });
   }

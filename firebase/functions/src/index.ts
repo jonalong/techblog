@@ -5,6 +5,7 @@ import * as cors from 'cors';
 import * as types from './types';
 import * as jwt from 'jsonwebtoken';
 import config from './config';
+//import * as bcrypt from 'bcrypt';
 
 const SECRET = config.SECRET;
 
@@ -30,8 +31,8 @@ function authCheck(req: express.Request, res: express.Response, next: express.Ne
   const token = (match as RegExpMatchArray)[1];
   try
   {
-    const decoded = jwt.verify(token, SECRET) as any;
-    res.locals.login = decoded.payload
+    jwt.verify(token, SECRET);
+    res.locals.login = jwt.decode(token);
   }
   catch
   {
@@ -49,23 +50,35 @@ function authCheck(req: express.Request, res: express.Response, next: express.Ne
 app.post('/auth/login', async function(req, res)
 {
   const login = req.body as types.Login;
-  const matchedUserSnapshot = await db.collection('/Users')
-    .where('email', '==', login.email)
-    .where('password', '==', login.password)
-    .get();
-  if (matchedUserSnapshot.docs?.length === 1)
+  const userSnapshot = await db.collection('/Users').where('email', '==', login.email).get();
+  if (userSnapshot.docs?.length === 1)
   {
-    const doc = matchedUserSnapshot.docs[0];
-    const token = jwt.sign({
-      id: doc.id,
-      nickname: doc.data().nickname
-    }, SECRET);
-
-    res.status(200).json({
-      success: {
-        jwt: token
-      }
-    });
+    const doc = userSnapshot.docs[0];
+    const user = doc.data() as types.User;
+    //if (bcrypt.compareSync(login.password, user.password))
+    if (login.password == user.password)
+    {
+      const token = jwt.sign({
+        id: doc.id,
+        nickname: user.nickname,
+        imgUrl: user.imgUrl
+      } as types.UserToken, SECRET);
+  
+      res.status(200).json({
+        success: {
+          jwt: token
+        }
+      });
+    }
+    else
+    {
+      res.status(403).json({
+        error: {
+          code: 'NO-AUTH',
+          message: 'you are not the one!'
+        }
+      });
+    }
   }
   else
   {
@@ -81,15 +94,20 @@ app.post('/auth/login', async function(req, res)
 blog.get('/articles', async function(req, res)
 {
   const articlesSnapshot = await db.collection('/Articles').orderBy('created', 'desc').get();
-  const articles = articlesSnapshot.docs.map(doc =>
+  const articles: {
+    articleId: string
+    article: types.ArticleListItem
+  }[] = articlesSnapshot.docs.map(doc =>
   {
-    const article = doc.data();
+    const article = doc.data() as types.Article;
     return {
-      id: doc.id,
-      author: article.author,
-      title: article.title,
-      created: article.created,
-      updated: article.updated
+      articleId: doc.id,
+      article: {
+        author: <types.Author> article.author,
+        title: article.title,
+        created: article.created as admin.firestore.Timestamp,
+        updated: article.updated as admin.firestore.Timestamp
+      }
     };
   });
 
@@ -101,8 +119,20 @@ blog.get('/articles', async function(req, res)
 blog.post('/articles', authCheck, async function(req, res)
 {
   const post = req.body as types.ArticlePost;
-  const article = {
-    user: res.locals.login,
+  const userToken = res.locals.login as types.UserToken
+
+  const userDoc = await db.collection('/Users').doc(userToken.id).get();
+  const user = userDoc.data() as types.User;
+  const authorWithId: types.AuthorWithId = {
+    id: userDoc.id,
+    email: user.email,
+    imgUrl: user.imgUrl,
+    nickname: user.nickname,
+    position: user.position
+  };
+
+  const article: types.Article = {
+    author: authorWithId,
     title: post.title,
     content: post.content,
     created: admin.firestore.FieldValue.serverTimestamp(),
@@ -122,14 +152,11 @@ blog.get('/articles/:id', async function(req, res)
   const articleDoc = await db.collection('/Articles').doc(id).get();
   if (articleDoc.exists)
   {
-    const article = articleDoc.data();
+    const article = articleDoc.data() as types.Article;
     res.status(200).json({
       success: {
-        id: articleDoc.id,
-        author: article?.author,
-        title: article?.title,
-        created: article?.created,
-        updated: article?.updated
+        articleId: articleDoc.id,
+        article
       }
     });
   }
@@ -150,7 +177,9 @@ blog.patch('/articles/:id', authCheck, async function(req, res)
   const articleDoc = await db.collection('/Articles').doc(id).get();
   if (articleDoc.exists)
   {
-    if (articleDoc.id !== (res.locals.login as types.LoginToken).id)
+    const userToken = res.locals.login as types.UserToken;
+    const article = articleDoc.data() as types.Article;
+    if (article.author.id !== userToken.id)
     {
       res.status(403).json({
         error: {
@@ -159,13 +188,16 @@ blog.patch('/articles/:id', authCheck, async function(req, res)
         }
       });
     }
-
-    const patch = req.body as types.ArticlePost;
-    const update = Object.assign({
-      updated: admin.firestore.FieldValue.serverTimestamp()
-    }, patch);
-
-    await db.collection('/Articles').doc(id).update(update);
+    else
+    {
+      const patch = req.body as types.ArticlePost;
+      const update = Object.assign({
+        updated: admin.firestore.FieldValue.serverTimestamp()
+      }, patch);
+  
+      await db.collection('/Articles').doc(id).update(update);
+      res.status(201);
+    }
   }
   else
   {
@@ -176,8 +208,6 @@ blog.patch('/articles/:id', authCheck, async function(req, res)
       }
     });
   }
-  
-  
 });
 
 blog.delete('/articles/:id', authCheck, async function(req, res)
@@ -186,7 +216,9 @@ blog.delete('/articles/:id', authCheck, async function(req, res)
   const articleDoc = await db.collection('/Articles').doc(id).get();
   if (articleDoc.exists)
   {
-    if (articleDoc.id !== (res.locals.login as types.LoginToken).id)
+    const userToken = res.locals.login as types.UserToken;
+    const article = articleDoc.data() as types.Article;
+    if (article.author.id !== userToken.id)
     {
       res.status(403).json({
         error: {
@@ -195,7 +227,11 @@ blog.delete('/articles/:id', authCheck, async function(req, res)
         }
       });
     }
-    await db.collection('/Articles').doc(id).delete();
+    else
+    {
+      await db.collection('/Articles').doc(id).delete();
+      res.status(201);
+    }
   }
   else
   {

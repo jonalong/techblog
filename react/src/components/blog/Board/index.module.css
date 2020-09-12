@@ -5,6 +5,7 @@
 .boardList {
     margin:auto;
     list-style-type: none;
+    padding: 0;
 }
 
 

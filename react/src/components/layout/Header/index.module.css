@@ -1,13 +1,14 @@
 .header {
     display: flex;
     justify-content:center;
+    margin-bottom: 50px;
     border-bottom-style:solid;
     border-width:thin;
     border-color:#E8E8E8;
 }
 
 .middle {
-    width: 1094px;
+    width: 900px;
     height: 100px;
     display: inline-flex;
     justify-content:space-between;
